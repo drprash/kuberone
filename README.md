@@ -12,7 +12,6 @@ KuberOne is a self-hosted, family-scoped portfolio tracking platform. A family a
 - **Member Invitation Flow**: Admin invites members who set their own password via activation token
 - **Multi-Account Portfolio**: Organize holdings into named investment accounts per member
 - **Multi-Asset Tracking**: Stocks, ETFs, REITs, Mutual Funds, Bonds, Gold, Silver, Crypto
-- **Account Types**: NRE, NRO, and Resident accounts
 - **Real-Time Market Data**: Powered by Yahoo Finance (free, no API key required)
 - **P&L Calculation**: Automatic profit/loss with current market prices
 - **Secure Auth**: JWT access + refresh tokens with JTI rotation and token versioning
