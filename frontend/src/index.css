@@ -92,6 +92,21 @@ code {
   animation: fadeIn 0.3s ease-in-out;
 }
 
+@keyframes trendlineDraw {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.trendline-path {
+  stroke-dashoffset: 1;
+  animation: trendlineDraw 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.trendline-dot {
+  opacity: 0;
+  animation: fadeIn 0.3s 1.65s ease-out forwards;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

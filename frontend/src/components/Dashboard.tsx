@@ -6,6 +6,7 @@ import { usePriceStore } from '../store/priceStore';
 import { getExchangeRate, formatAmount } from '../lib/currencies';
 import type { HoldingWithMarketData, PortfolioSummary, AccountSummary } from '../types';
 import PortfolioSummaryComponent from './PortfolioSummary';
+import PortfolioTrendline from './PortfolioTrendline';
 import AddHolding from './AddHolding';
 import toast from 'react-hot-toast';
 import { RefreshCw } from 'lucide-react';
@@ -207,6 +208,12 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
+            <PortfolioTrendline
+              summary={summary}
+              baseCurrency={baseCurrency}
+              loading={pricesLoading}
+            />
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 card-hover slide-in">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Top 5 Lifetime Gainers</h3>

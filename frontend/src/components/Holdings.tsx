@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { holdingsAPI, accountsAPI, marketAPI } from '../lib/api';
-import { HoldingWithMarketData, Holding, AccountSummary } from '../types';
+import { HoldingWithMarketData, Holding, AccountSummary, PortfolioSummary } from '../types';
 import { formatAmount } from '../lib/currencies';
 import { usePriceStore } from '../store/priceStore';
+import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
 import AddHolding from './AddHolding';
 import ImportHoldings from './ImportHoldings';
+import PortfolioSummaryComponent from './PortfolioSummary';
 import { Edit2, Trash2, AlertTriangle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 
 type SortKey =
@@ -174,6 +176,32 @@ export default function Holdings() {
     });
   }, [holdings, sortKey, sortDir]);
 
+  const family = useAuthStore((state) => state.family);
+  const baseCurrency = family?.base_currency || 'INR';
+  const selectedAccount = useMemo(
+    () => accounts.find((a) => a.id === selectedAccountId),
+    [accounts, selectedAccountId]
+  );
+  const displayCurrency = selectedAccount?.currency || baseCurrency;
+
+  const holdingsSummary = useMemo((): PortfolioSummary => {
+    const total_investment = holdings.reduce(
+      (sum, h) => sum + Number(h.quantity) * Number(h.avg_buy_price),
+      0
+    );
+    const current_value = holdings.reduce((sum, h) => sum + (h.current_value || 0), 0);
+    const total_profit_loss = current_value - total_investment;
+    const total_profit_loss_percentage =
+      total_investment > 0 ? (total_profit_loss / total_investment) * 100 : 0;
+    return {
+      total_investment,
+      current_value,
+      total_profit_loss,
+      total_profit_loss_percentage,
+      holdings_count: holdings.length,
+    };
+  }, [holdings]);
+
   const SortIcon = ({ col }: { col: SortKey }) => {
     if (sortKey !== col) return <ChevronsUpDown size={13} className="inline ml-1 text-gray-400 opacity-50" />;
     return sortDir === 'asc'
@@ -242,6 +270,11 @@ export default function Holdings() {
             </button>
           </div>
         </div>
+
+        {/* Summary tiles for selected account / all accounts */}
+        {holdings.length > 0 && (
+          <PortfolioSummaryComponent summary={holdingsSummary} baseCurrency={displayCurrency} />
+        )}
 
         {/* Draft Holdings Section */}
         {draftHoldings.length > 0 && (
