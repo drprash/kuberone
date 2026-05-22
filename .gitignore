@@ -47,6 +47,7 @@ build/
 .DS_Store
 Thumbs.db
 KuberOne.png
+docs/
 
 # Docker
 *.log

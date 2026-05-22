@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { holdingsAPI, accountsAPI, marketAPI } from '../lib/api';
 import { HoldingWithMarketData, Holding, AccountSummary } from '../types';
 import { formatAmount } from '../lib/currencies';
+import { usePriceStore } from '../store/priceStore';
 import toast from 'react-hot-toast';
 import AddHolding from './AddHolding';
 import ImportHoldings from './ImportHoldings';
-import { Edit2, Trash2, AlertTriangle } from 'lucide-react';
+import { Edit2, Trash2, AlertTriangle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+
+type SortKey =
+  | 'symbol' | 'asset_type' | 'quantity' | 'avg_buy_price'
+  | 'current_price' | 'invested' | 'current_value' | 'profit_loss' | 'profit_loss_percentage';
+type SortDir = 'asc' | 'desc';
 
 /** Always "Account Name - User First Name (Currency)" */
 function accountDisplayName(account: AccountSummary): string {
@@ -15,21 +21,33 @@ function accountDisplayName(account: AccountSummary): string {
     : `${account.name} (${currency})`;
 }
 
+function timeAgo(ts: number): string {
+  const seconds = Math.floor((Date.now() - ts) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
 export default function Holdings() {
   const [holdings, setHoldings] = useState<HoldingWithMarketData[]>([]);
   const [draftHoldings, setDraftHoldings] = useState<Holding[]>([]);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [pricesLoading, setPricesLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [editingHolding, setEditingHolding] = useState<HoldingWithMarketData | Holding | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const priceStore = usePriceStore();
 
   useEffect(() => {
     loadData();
   }, [selectedAccountId]);
 
-  const loadData = async () => {
+  const loadData = async (force = false) => {
     setLoading(true);
     try {
       const [accountsData, allHoldingsData] = await Promise.all([
@@ -38,11 +56,6 @@ export default function Holdings() {
       ]);
 
       setAccounts(accountsData);
-
-      const accountCurrencyMap: Record<string, string> = {};
-      for (const acc of accountsData) {
-        accountCurrencyMap[acc.id] = acc.currency || 'INR';
-      }
 
       const drafts = allHoldingsData.filter((h) => h.is_draft);
       const nonDrafts = allHoldingsData.filter((h) => !h.is_draft);
@@ -54,9 +67,28 @@ export default function Holdings() {
         return;
       }
 
-      // Batch fetch all prices at once
-      const symbols = [...new Set(nonDrafts.map((h) => h.symbol))].join(',');
-      const priceMap = await marketAPI.getBatchPrices(symbols);
+      const symbols = [...new Set(nonDrafts.map((h) => h.symbol.toUpperCase()))];
+
+      if (!force && priceStore.isCacheFresh(symbols)) {
+        const holdingsWithPrices = nonDrafts.map((holding) => {
+          const priceData = priceStore.priceMap[holding.symbol.toUpperCase()] || {};
+          const currentPrice = Number(priceData.current_price) || 0;
+          const currentValue = Number(holding.quantity) * currentPrice;
+          const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price);
+          const profitLoss = currentValue - investedValue;
+          const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
+          return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
+        });
+        setHoldings(holdingsWithPrices);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+      setPricesLoading(true);
+
+      const priceMap = await marketAPI.getBatchPrices(symbols.join(','));
+      priceStore.setPrices(priceMap);
 
       const holdingsWithPrices = nonDrafts.map((holding) => {
         const priceData = priceMap[holding.symbol.toUpperCase()] || {};
@@ -65,13 +97,7 @@ export default function Holdings() {
         const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price);
         const profitLoss = currentValue - investedValue;
         const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
-        return {
-          ...holding,
-          current_price: currentPrice,
-          current_value: currentValue,
-          profit_loss: profitLoss,
-          profit_loss_percentage: profitLossPercentage,
-        };
+        return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
       });
 
       setHoldings(holdingsWithPrices);
@@ -79,6 +105,7 @@ export default function Holdings() {
       toast.error('Failed to load holdings');
     } finally {
       setLoading(false);
+      setPricesLoading(false);
     }
   };
 
@@ -87,7 +114,7 @@ export default function Holdings() {
     try {
       await holdingsAPI.delete(id);
       toast.success('Holding deleted successfully');
-      loadData();
+      loadData(true);
     } catch {
       toast.error('Failed to delete holding');
     }
@@ -98,13 +125,12 @@ export default function Holdings() {
     try {
       await holdingsAPI.delete(id);
       toast.success('Draft deleted');
-      loadData();
+      loadData(true);
     } catch {
       toast.error('Failed to delete draft');
     }
   };
 
-  // Get currency for a holding from its account
   const holdingCurrency = (accountId: string): string => {
     return accounts.find((a) => a.id === accountId)?.currency || 'INR';
   };
@@ -116,6 +142,44 @@ export default function Holdings() {
 
   const formatName = (name: string) =>
     name.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedHoldings = useMemo(() => {
+    if (!sortKey) return holdings;
+    return [...holdings].sort((a, b) => {
+      let aVal: number | string;
+      let bVal: number | string;
+      switch (sortKey) {
+        case 'symbol':       aVal = a.symbol;                                              bVal = b.symbol; break;
+        case 'asset_type':   aVal = a.asset_type;                                          bVal = b.asset_type; break;
+        case 'quantity':     aVal = Number(a.quantity);                                    bVal = Number(b.quantity); break;
+        case 'avg_buy_price':aVal = Number(a.avg_buy_price);                               bVal = Number(b.avg_buy_price); break;
+        case 'current_price':aVal = Number(a.current_price) || 0;                          bVal = Number(b.current_price) || 0; break;
+        case 'invested':     aVal = Number(a.quantity) * Number(a.avg_buy_price);          bVal = Number(b.quantity) * Number(b.avg_buy_price); break;
+        case 'current_value':aVal = Number(a.current_value) || 0;                          bVal = Number(b.current_value) || 0; break;
+        case 'profit_loss':  aVal = Number(a.profit_loss) || 0;                            bVal = Number(b.profit_loss) || 0; break;
+        default:             aVal = Number(a.profit_loss_percentage) || 0;                 bVal = Number(b.profit_loss_percentage) || 0; break;
+      }
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [holdings, sortKey, sortDir]);
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <ChevronsUpDown size={13} className="inline ml-1 text-gray-400 opacity-50" />;
+    return sortDir === 'asc'
+      ? <ChevronUp size={13} className="inline ml-1 text-indigo-500" />
+      : <ChevronDown size={13} className="inline ml-1 text-indigo-500" />;
+  };
 
   if (loading) {
     return (
@@ -145,7 +209,25 @@ export default function Holdings() {
               ))}
             </select>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            {pricesLoading && (
+              <span className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-indigo-400" />
+                Fetching prices…
+              </span>
+            )}
+            {!pricesLoading && priceStore.fetchedAt && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Prices from {timeAgo(priceStore.fetchedAt)}
+              </span>
+            )}
+            <button
+              onClick={() => loadData(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 btn-press transition-all duration-200 font-medium text-sm"
+            >
+              <RefreshCw size={16} />
+              Refresh
+            </button>
             <button
               onClick={() => setShowImportModal(true)}
               className="border border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 px-4 py-2 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all duration-200 font-medium text-sm"
@@ -234,20 +316,32 @@ export default function Holdings() {
             <table className="min-w-full min-w-[800px] divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Symbol</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Type</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Quantity</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Avg Price</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Current Price</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Invested</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Current Value</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">P&amp;L</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Return %</th>
+                  {(
+                    [
+                      { key: 'symbol',               label: 'Symbol',        align: 'left'   },
+                      { key: 'asset_type',            label: 'Type',          align: 'left'   },
+                      { key: 'quantity',              label: 'Quantity',      align: 'right'  },
+                      { key: 'avg_buy_price',         label: 'Avg Price',     align: 'right'  },
+                      { key: 'current_price',         label: 'Current Price', align: 'right'  },
+                      { key: 'invested',              label: 'Invested',      align: 'right'  },
+                      { key: 'current_value',         label: 'Current Value', align: 'right'  },
+                      { key: 'profit_loss',           label: 'P&L',           align: 'right'  },
+                      { key: 'profit_loss_percentage',label: 'Return %',      align: 'right'  },
+                    ] as { key: SortKey; label: string; align: 'left' | 'right' }[]
+                  ).map(({ key, label, align }) => (
+                    <th
+                      key={key}
+                      onClick={() => handleSort(key)}
+                      className={`px-4 py-3 text-${align} text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 whitespace-nowrap`}
+                    >
+                      {label}<SortIcon col={key} />
+                    </th>
+                  ))}
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {holdings.map((holding) => {
+                {sortedHoldings.map((holding) => {
                   const ccy = holdingCurrency(holding.account_id);
                   const invested = Number(holding.quantity) * Number(holding.avg_buy_price);
                   const current = Number(holding.current_value) || 0;
@@ -294,14 +388,14 @@ export default function Holdings() {
       {showAddModal && (
         <AddHolding
           onClose={() => setShowAddModal(false)}
-          onSuccess={() => { setShowAddModal(false); loadData(); }}
+          onSuccess={() => { setShowAddModal(false); loadData(true); }}
         />
       )}
 
       {showImportModal && (
         <ImportHoldings
           onClose={() => setShowImportModal(false)}
-          onSuccess={() => { setShowImportModal(false); loadData(); }}
+          onSuccess={() => { setShowImportModal(false); loadData(true); }}
         />
       )}
 
@@ -309,7 +403,7 @@ export default function Holdings() {
         <AddHolding
           holding={editingHolding}
           onClose={() => setEditingHolding(null)}
-          onSuccess={() => { setEditingHolding(null); loadData(); }}
+          onSuccess={() => { setEditingHolding(null); loadData(true); }}
         />
       )}
     </div>

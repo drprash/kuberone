@@ -3,11 +3,13 @@ import { useAuthStore } from '../store/authStore';
 import FamilySettings from '../components/Settings/FamilySettings';
 import MemberManagement from '../components/Settings/MemberManagement';
 import BackupRestore from '../components/Settings/BackupRestore';
+import Preferences from '../components/Settings/Preferences';
 
 const tabs = [
   { id: 'family', label: 'Family & Theme' },
   { id: 'members', label: 'Member Management', adminOnly: true },
   { id: 'backup', label: 'Backup & Restore' },
+  { id: 'preferences', label: 'Preferences' },
 ];
 
 export default function Settings() {
@@ -48,6 +50,7 @@ export default function Settings() {
         {activeTab === 'family' && <FamilySettings />}
         {activeTab === 'members' && isAdmin && <MemberManagement />}
         {activeTab === 'backup' && <BackupRestore />}
+        {activeTab === 'preferences' && <Preferences />}
       </div>
     </div>
   );

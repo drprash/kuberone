@@ -86,8 +86,8 @@ def get_market_price(symbol: str):
 
 @router.get("/prices", response_model=Dict[str, schemas.MarketPrice])
 def get_batch_prices(symbols: str):
-    """Get prices for multiple comma-separated symbols concurrently (max 30)."""
-    symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()][:30]
+    """Get prices for multiple comma-separated symbols concurrently."""
+    symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
     if not symbol_list:
         return {}
     with ThreadPoolExecutor(max_workers=min(len(symbol_list), 10)) as executor:

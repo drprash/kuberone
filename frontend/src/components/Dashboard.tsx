@@ -2,12 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { holdingsAPI, marketAPI, accountsAPI } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { usePriceStore } from '../store/priceStore';
 import { getExchangeRate, formatAmount } from '../lib/currencies';
 import type { HoldingWithMarketData, PortfolioSummary, AccountSummary } from '../types';
 import PortfolioSummaryComponent from './PortfolioSummary';
 import AddHolding from './AddHolding';
 import toast from 'react-hot-toast';
 import { RefreshCw } from 'lucide-react';
+
+function timeAgo(ts: number): string {
+  const seconds = Math.floor((Date.now() - ts) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
 
 export default function Dashboard() {
   const [holdings, setHoldings] = useState<HoldingWithMarketData[]>([]);
@@ -18,8 +27,35 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const family = useAuthStore((state) => state.family);
   const baseCurrency = family?.base_currency || 'INR';
+  const priceStore = usePriceStore();
 
-  const fetchHoldings = async () => {
+  const applyPrices = (
+    holdingsData: HoldingWithMarketData[],
+    priceMap: Record<string, any>,
+    accountCurrencyMap: Record<string, string>
+  ): HoldingWithMarketData[] =>
+    holdingsData.map((h) => {
+      const priceData = priceMap[h.symbol.toUpperCase()] || {};
+      const accountCurrency = accountCurrencyMap[h.account_id] || baseCurrency;
+      const fx = getExchangeRate(accountCurrency, baseCurrency);
+      const current_price = Number(priceData.current_price) || 0;
+      const quantity = Number(h.quantity);
+      const current_value = current_price * quantity * fx;
+      const investment = Number(h.avg_buy_price) * quantity * fx;
+      const profit_loss = current_value - investment;
+      const profit_loss_percentage = investment > 0 ? (profit_loss / investment) * 100 : 0;
+      return {
+        ...h,
+        current_price,
+        current_value,
+        profit_loss,
+        profit_loss_percentage,
+        day_change: priceData.day_change != null ? Number(priceData.day_change) : null,
+        day_change_pct: priceData.day_change_pct != null ? Number(priceData.day_change_pct) : null,
+      };
+    });
+
+  const fetchHoldings = async (force = false) => {
     setLoading(true);
     try {
       const [holdingsData, accountsData] = await Promise.all([
@@ -37,7 +73,15 @@ export default function Dashboard() {
         return;
       }
 
-      // Show holdings immediately with zero prices so the table renders without waiting
+      const symbols = [...new Set(holdingsData.map((h) => h.symbol.toUpperCase()))];
+
+      if (!force && priceStore.isCacheFresh(symbols)) {
+        setHoldings(applyPrices(holdingsData as HoldingWithMarketData[], priceStore.priceMap, accountCurrencyMap));
+        setLoading(false);
+        return;
+      }
+
+      // Show holdings immediately with zero prices while we fetch
       setHoldings(holdingsData.map((h) => ({
         ...h,
         current_price: 0,
@@ -50,32 +94,10 @@ export default function Dashboard() {
       setLoading(false);
       setPricesLoading(true);
 
-      // Fetch all prices in one batch request (server-side parallel)
-      const symbols = [...new Set(holdingsData.map((h) => h.symbol))].join(',');
-      const priceMap = await marketAPI.getBatchPrices(symbols);
+      const priceMap = await marketAPI.getBatchPrices(symbols.join(','));
+      priceStore.setPrices(priceMap);
 
-      setHoldings(holdingsData.map((h) => {
-        const priceData = priceMap[h.symbol.toUpperCase()] || {};
-        const accountCurrency = accountCurrencyMap[h.account_id] || baseCurrency;
-        const fx = getExchangeRate(accountCurrency, baseCurrency);
-
-        const current_price = Number(priceData.current_price) || 0;
-        const quantity = Number(h.quantity);
-        const current_value = current_price * quantity * fx;
-        const investment = Number(h.avg_buy_price) * quantity * fx;
-        const profit_loss = current_value - investment;
-        const profit_loss_percentage = investment > 0 ? (profit_loss / investment) * 100 : 0;
-
-        return {
-          ...h,
-          current_price,
-          current_value,
-          profit_loss,
-          profit_loss_percentage,
-          day_change: priceData.day_change != null ? Number(priceData.day_change) : null,
-          day_change_pct: priceData.day_change_pct != null ? Number(priceData.day_change_pct) : null,
-        };
-      }));
+      setHoldings(applyPrices(holdingsData as HoldingWithMarketData[], priceMap, accountCurrencyMap));
     } catch (error: any) {
       toast.error('Failed to fetch holdings');
       setLoading(false);
@@ -150,8 +172,13 @@ export default function Dashboard() {
                 Fetching prices…
               </span>
             )}
+            {!pricesLoading && priceStore.fetchedAt && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Prices from {timeAgo(priceStore.fetchedAt)}
+              </span>
+            )}
             <button
-              onClick={fetchHoldings}
+              onClick={() => fetchHoldings(true)}
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 btn-press transition-all duration-200 font-medium"
             >
               <RefreshCw size={16} />
@@ -309,7 +336,7 @@ export default function Dashboard() {
       {showAddHolding && (
         <AddHolding
           onClose={() => setShowAddHolding(false)}
-          onSuccess={() => { setShowAddHolding(false); fetchHoldings(); }}
+          onSuccess={() => { setShowAddHolding(false); fetchHoldings(true); }}
         />
       )}
 
@@ -317,7 +344,7 @@ export default function Dashboard() {
         <AddHolding
           holding={editingHolding}
           onClose={() => setEditingHolding(null)}
-          onSuccess={() => { setEditingHolding(null); fetchHoldings(); }}
+          onSuccess={() => { setEditingHolding(null); fetchHoldings(true); }}
         />
       )}
     </div>
