@@ -39,11 +39,13 @@ yarn-error.log*
 # Build
 dist/
 build/
+scripts/
 
 # IDE and OS files
 .idea/
 .vscode/
 .claude/
+.codegraph/
 .DS_Store
 Thumbs.db
 KuberOne.png

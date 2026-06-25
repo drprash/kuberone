@@ -65,6 +65,7 @@ def create_backup(
                     "name": account.name,
                     "currency": account.currency,
                     "asset_types": account.asset_types,
+                    "sort_order": account.sort_order,
                     "user_id": str(user.id),
                     "user_email": user.email,
                     "user_first_name": user.first_name,
@@ -94,13 +95,15 @@ def create_backup(
 @router.post("/restore")
 def restore_backup(
     file: UploadFile = File(...),
+    mode: str = "replace",
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Restore accounts and holdings from a KuberOne JSON backup.
 
+    mode="replace": clear existing holdings in matched accounts before inserting (default).
+    mode="append":  add backup holdings on top of existing ones.
     - Accounts are matched by (owner user_id + name + currency); created if not found.
-    - Holdings are always inserted fresh into the matched/created account.
     - Admin: can restore data for any family member found by email in the backup.
     - Member: only restores accounts whose user_email matches their own email.
     """
@@ -159,6 +162,10 @@ def restore_backup(
         if existing:
             account = existing
             accounts_matched += 1
+            if mode == "replace":
+                db.query(models.Holding).filter(
+                    models.Holding.account_id == account.id
+                ).delete(synchronize_session=False)
         else:
             account = models.Account(
                 family_id=current_user.family_id,
@@ -166,6 +173,7 @@ def restore_backup(
                 name=acc_data["name"],
                 currency=acc_data.get("currency", "INR"),
                 asset_types=acc_data.get("asset_types", ["STOCK"]),
+                sort_order=acc_data.get("sort_order", accounts_created),
             )
             db.add(account)
             db.flush()  # obtain account.id before inserting holdings

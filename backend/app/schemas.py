@@ -1,9 +1,15 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from app.models import AssetType, Role, PrivacyLevel
+
+
+def _as_utc(v: Optional[datetime]) -> Optional[datetime]:
+    if v is not None and v.tzinfo is None:
+        return v.replace(tzinfo=timezone.utc)
+    return v
 
 # Family schemas
 class FamilyBase(BaseModel):
@@ -23,6 +29,8 @@ class FamilyUpdate(BaseModel):
 class FamilyResponse(FamilyBase):
     id: UUID
     created_at: datetime
+
+    _utc_created = validator("created_at", pre=True, always=True, allow_reuse=True)(_as_utc)
 
     class Config:
         from_attributes = True
@@ -52,6 +60,8 @@ class UserResponse(UserBase):
     password_required: bool
     created_at: datetime
 
+    _utc_created = validator("created_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+
     class Config:
         from_attributes = True
 
@@ -78,6 +88,8 @@ class MemberInviteInformation(BaseModel):
     activation_token: str
     activation_expires_at: datetime
 
+    _utc_expires = validator("activation_expires_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+
     class Config:
         from_attributes = True
 
@@ -90,6 +102,8 @@ class PasswordResetTokenResponse(BaseModel):
     expires_at: datetime
     user_email: str
 
+    _utc_expires = validator("expires_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+
     class Config:
         from_attributes = True
 
@@ -97,6 +111,8 @@ class ActivationTokenVerification(BaseModel):
     valid: bool
     expires_at: Optional[datetime] = None
     user_email: Optional[str] = None
+
+    _utc_expires = validator("expires_at", pre=True, always=True, allow_reuse=True)(_as_utc)
 
 # Auth token response (access + refresh + user + family for KuberOne context)
 class TokenRefresh(BaseModel):
@@ -135,6 +151,9 @@ class AccountResponse(AccountBase):
     created_at: datetime
     updated_at: datetime
 
+    _utc_created = validator("created_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+    _utc_updated = validator("updated_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+
     class Config:
         from_attributes = True
 
@@ -151,8 +170,8 @@ class HoldingCreate(BaseModel):
     account_id: UUID
     symbol: str
     name: str
-    quantity: Decimal
-    avg_buy_price: Decimal
+    quantity: Decimal = Field(..., gt=0)
+    avg_buy_price: Decimal = Field(..., gt=0)
     asset_type: AssetType
     is_draft: bool = False
 
@@ -175,6 +194,9 @@ class HoldingResponse(BaseModel):
     is_draft: bool
     created_at: datetime
     updated_at: datetime
+
+    _utc_created = validator("created_at", pre=True, always=True, allow_reuse=True)(_as_utc)
+    _utc_updated = validator("updated_at", pre=True, always=True, allow_reuse=True)(_as_utc)
 
     class Config:
         from_attributes = True

@@ -40,7 +40,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Toaster position="top-right" />
+        <Toaster position="top-center" />
         <React.Suspense fallback={<Spinner />}>
           <Routes>
             {/* Auth routes */}

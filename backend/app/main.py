@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.database import engine, Base
 from app.config import settings
 from app.routers import auth, holdings, market, accounts, admin, backup
@@ -23,8 +24,33 @@ def build_allowed_origins(frontend_url_value: str) -> list[str]:
 
     return allow_origins
 
-# Create database tables
+
+def run_migrations() -> None:
+    """Apply incremental DDL on every startup — all statements are idempotent."""
+    statements = [
+        # account_type was removed from the ORM model but left as NOT NULL with no default
+        # on existing installs. Only set the default if the column still exists (fresh installs
+        # won't have it because create_all uses the current model which no longer defines it).
+        """
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'holdings' AND column_name = 'account_type'
+            ) THEN
+                ALTER TABLE holdings ALTER COLUMN account_type SET DEFAULT 'RESIDENT';
+            END IF;
+        END $$
+        """,
+    ]
+    with engine.connect() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+        conn.commit()
+
+
+# Create base tables then apply incremental migrations
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 app = FastAPI(
     title=settings.app_name,

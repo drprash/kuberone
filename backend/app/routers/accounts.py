@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
 from typing import List
 from decimal import Decimal
 from app.database import get_db
@@ -67,8 +66,6 @@ def get_accounts(
         ).all()
 
         invested_amount = sum(h.quantity * h.avg_buy_price for h in holdings)
-        # Note: current_value requires market prices, will be calculated on frontend
-        # For now, return 0 and let frontend fetch prices
 
         result.append(schemas.AccountSummary(
             id=account.id,
@@ -84,7 +81,7 @@ def get_accounts(
             profit_loss=Decimal("0"),
             profit_loss_percentage=Decimal("0"),
             holdings_count=len(holdings),
-            user_first_name=account.user.first_name if account.user else None
+            user_first_name=account.user.first_name if account.user else None,
         ))
 
     return result

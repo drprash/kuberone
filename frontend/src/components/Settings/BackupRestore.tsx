@@ -21,6 +21,7 @@ export default function BackupRestore() {
   const [restorePreview, setRestorePreview] = useState<BackupData | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
+  const [showModeModal, setShowModeModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -94,18 +95,24 @@ export default function BackupRestore() {
     reader.readAsText(file);
   };
 
-  const handleRestore = async () => {
+  const handleRestore = () => {
     if (!restoreFile) return;
+    setShowModeModal(true);
+  };
+
+  const executeRestore = async (mode: 'replace' | 'append') => {
+    if (!restoreFile) return;
+    setShowModeModal(false);
     setRestoring(true);
     try {
-      const result = await backupAPI.restore(restoreFile);
+      const result = await backupAPI.restore(restoreFile, mode);
       setRestoreResult(result);
       setRestoreFile(null);
       setRestorePreview(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       toast.success('Restore completed');
     } catch {
-      toast.error('Restore failed');
+      // interceptor already shows the backend error detail
     } finally {
       setRestoring(false);
     }
@@ -327,6 +334,48 @@ export default function BackupRestore() {
           {restoring ? 'Restoring…' : 'Restore from Backup'}
         </button>
       </div>
+
+      {/* Restore mode confirmation modal */}
+      {showModeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+                How should we restore?
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                Accounts already exist with the same name. Choose what to do with their current holdings.
+              </p>
+              <div className="space-y-3 mb-6">
+                <button
+                  onClick={() => executeRestore('replace')}
+                  className="w-full text-left p-4 border-2 border-indigo-500 dark:border-indigo-400 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                >
+                  <p className="font-medium text-gray-900 dark:text-white">Clear &amp; Restore</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    Wipe existing holdings in matched accounts and replace with the backup. Best for a clean restore.
+                  </p>
+                </button>
+                <button
+                  onClick={() => executeRestore('append')}
+                  className="w-full text-left p-4 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  <p className="font-medium text-gray-900 dark:text-white">Append</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    Add backup holdings alongside existing ones. May create duplicates.
+                  </p>
+                </button>
+              </div>
+              <button
+                onClick={() => setShowModeModal(false)}
+                className="w-full text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 py-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

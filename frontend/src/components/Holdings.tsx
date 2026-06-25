@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { holdingsAPI, accountsAPI, marketAPI } from '../lib/api';
 import { HoldingWithMarketData, Holding, AccountSummary, PortfolioSummary } from '../types';
-import { formatAmount } from '../lib/currencies';
+import { formatAmount, getExchangeRate } from '../lib/currencies';
 import { usePriceStore } from '../store/priceStore';
 import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
@@ -35,7 +36,10 @@ export default function Holdings() {
   const [holdings, setHoldings] = useState<HoldingWithMarketData[]>([]);
   const [draftHoldings, setDraftHoldings] = useState<Holding[]>([]);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [searchParams] = useSearchParams();
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    searchParams.get('account') || ''
+  );
   const [loading, setLoading] = useState(true);
   const [pricesLoading, setPricesLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -44,6 +48,8 @@ export default function Holdings() {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const priceStore = usePriceStore();
+  const family = useAuthStore((state) => state.family);
+  const baseCurrency = family?.base_currency || 'INR';
 
   useEffect(() => {
     loadData();
@@ -58,6 +64,11 @@ export default function Holdings() {
       ]);
 
       setAccounts(accountsData);
+
+      const accountCurrencyMap: Record<string, string> = {};
+      for (const acc of accountsData) {
+        accountCurrencyMap[acc.id] = acc.currency || baseCurrency;
+      }
 
       const drafts = allHoldingsData.filter((h) => h.is_draft);
       const nonDrafts = allHoldingsData.filter((h) => !h.is_draft);
@@ -75,8 +86,10 @@ export default function Holdings() {
         const holdingsWithPrices = nonDrafts.map((holding) => {
           const priceData = priceStore.priceMap[holding.symbol.toUpperCase()] || {};
           const currentPrice = Number(priceData.current_price) || 0;
-          const currentValue = Number(holding.quantity) * currentPrice;
-          const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price);
+          const accountCurrency = accountCurrencyMap[holding.account_id] || baseCurrency;
+          const fx = getExchangeRate(accountCurrency, baseCurrency);
+          const currentValue = Number(holding.quantity) * currentPrice * fx;
+          const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price) * fx;
           const profitLoss = currentValue - investedValue;
           const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
           return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
@@ -95,8 +108,10 @@ export default function Holdings() {
       const holdingsWithPrices = nonDrafts.map((holding) => {
         const priceData = priceMap[holding.symbol.toUpperCase()] || {};
         const currentPrice = Number(priceData.current_price) || 0;
-        const currentValue = Number(holding.quantity) * currentPrice;
-        const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price);
+        const accountCurrency = accountCurrencyMap[holding.account_id] || baseCurrency;
+        const fx = getExchangeRate(accountCurrency, baseCurrency);
+        const currentValue = Number(holding.quantity) * currentPrice * fx;
+        const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price) * fx;
         const profitLoss = currentValue - investedValue;
         const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
         return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
@@ -176,8 +191,6 @@ export default function Holdings() {
     });
   }, [holdings, sortKey, sortDir]);
 
-  const family = useAuthStore((state) => state.family);
-  const baseCurrency = family?.base_currency || 'INR';
   const selectedAccount = useMemo(
     () => accounts.find((a) => a.id === selectedAccountId),
     [accounts, selectedAccountId]
@@ -186,7 +199,7 @@ export default function Holdings() {
 
   const holdingsSummary = useMemo((): PortfolioSummary => {
     const total_investment = holdings.reduce(
-      (sum, h) => sum + Number(h.quantity) * Number(h.avg_buy_price),
+      (sum, h) => sum + ((h.current_value ?? 0) - (h.profit_loss ?? 0)),
       0
     );
     const current_value = holdings.reduce((sum, h) => sum + (h.current_value || 0), 0);
@@ -223,7 +236,7 @@ export default function Holdings() {
         {/* Header */}
         <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Holdings</h2>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Holdings</h2>
             <select
               value={selectedAccountId}
               onChange={(e) => setSelectedAccountId(e.target.value)}
@@ -273,7 +286,7 @@ export default function Holdings() {
 
         {/* Summary tiles for selected account / all accounts */}
         {holdings.length > 0 && (
-          <PortfolioSummaryComponent summary={holdingsSummary} baseCurrency={displayCurrency} />
+          <PortfolioSummaryComponent summary={holdingsSummary} baseCurrency={baseCurrency} />
         )}
 
         {/* Draft Holdings Section */}
@@ -289,7 +302,7 @@ export default function Holdings() {
               <table className="min-w-full min-w-[600px] text-sm">
                 <thead>
                   <tr className="border-b border-amber-200 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/30">
-                    <th className="px-4 py-2 text-left font-medium text-amber-800 dark:text-amber-300">Symbol</th>
+                    <th className="px-4 py-2 text-left font-medium text-amber-800 dark:text-amber-300 sticky left-0 z-20 bg-amber-100 dark:bg-amber-900/30 border-r border-amber-200 dark:border-amber-700">Symbol</th>
                     <th className="px-4 py-2 text-left font-medium text-amber-800 dark:text-amber-300">Name</th>
                     <th className="px-4 py-2 text-left font-medium text-amber-800 dark:text-amber-300">Asset Type</th>
                     <th className="px-4 py-2 text-right font-medium text-amber-800 dark:text-amber-300">Quantity</th>
@@ -302,7 +315,7 @@ export default function Holdings() {
                     const ccy = holdingCurrency(draft.account_id);
                     return (
                       <tr key={draft.id} className="hover:bg-amber-100/50 dark:hover:bg-amber-900/20">
-                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white sticky left-0 z-10 bg-amber-50 dark:bg-amber-900/20 border-r border-amber-200 dark:border-amber-700">
                           {draft.symbol}
                           <span className="ml-2 text-xs bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium">
                             Draft
@@ -314,10 +327,10 @@ export default function Holdings() {
                         <td className="px-4 py-3 text-right text-gray-900 dark:text-white">{formatAmount(Number(draft.avg_buy_price), ccy, 2)}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2 justify-center">
-                            <button onClick={() => setEditingHolding(draft)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400" title="Complete Draft">
+                            <button onClick={() => setEditingHolding(draft)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 p-1.5 rounded" title="Complete Draft">
                               <Edit2 size={16} />
                             </button>
-                            <button onClick={() => handleDeleteDraft(draft.id)} className="text-red-600 hover:text-red-800 dark:hover:text-red-400" title="Delete Draft">
+                            <button onClick={() => handleDeleteDraft(draft.id)} className="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1.5 rounded" title="Delete Draft">
                               <Trash2 size={16} />
                             </button>
                           </div>
@@ -365,7 +378,7 @@ export default function Holdings() {
                     <th
                       key={key}
                       onClick={() => handleSort(key)}
-                      className={`px-4 py-3 text-${align} text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 whitespace-nowrap`}
+                      className={`px-4 py-3 text-${align} text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 whitespace-nowrap ${key === 'symbol' ? 'sticky left-0 z-20 bg-gray-50 dark:bg-gray-700 border-r border-gray-200 dark:border-gray-600' : ''}`}
                     >
                       {label}<SortIcon col={key} />
                     </th>
@@ -376,35 +389,38 @@ export default function Holdings() {
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {sortedHoldings.map((holding) => {
                   const ccy = holdingCurrency(holding.account_id);
+                  const fx = getExchangeRate(ccy, baseCurrency);
                   const invested = Number(holding.quantity) * Number(holding.avg_buy_price);
                   const current = Number(holding.current_value) || 0;
                   const pl = Number(holding.profit_loss) || 0;
                   const plPercent = Number(holding.profit_loss_percentage) || 0;
 
                   return (
-                    <tr key={holding.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-gray-900 dark:text-white">{holding.symbol}</div>
+                    <tr key={holding.id} className="group hover:bg-gray-50 dark:hover:bg-gray-700">
+                      <td className="py-3 px-4 sticky left-0 z-10 bg-white dark:bg-gray-800 group-hover:bg-gray-50 dark:group-hover:bg-gray-700 border-r border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-gray-900 dark:text-white">{holding.symbol}</span>
+                        </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{formatName(holding.name)}</div>
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-300">{holding.asset_type}</td>
                       <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatNumber(Number(holding.quantity))}</td>
                       <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatAmount(Number(holding.avg_buy_price), ccy, 2)}</td>
                       <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatAmount(Number(holding.current_price) || 0, ccy, 2)}</td>
-                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(invested, ccy)}</td>
-                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(current, ccy)}</td>
+                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(invested * fx, baseCurrency)}</td>
+                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(current, baseCurrency)}</td>
                       <td className={`py-3 px-4 text-right text-sm font-semibold ${pl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatAmount(pl, ccy)}
+                        {formatAmount(pl, baseCurrency)}
                       </td>
                       <td className={`py-3 px-4 text-right text-sm font-semibold ${plPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatPercentage(plPercent)}
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex gap-2 justify-center">
-                          <button onClick={() => setEditingHolding(holding)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400" title="Edit Holding">
+                          <button onClick={() => setEditingHolding(holding)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 p-1.5 rounded" title="Edit Holding">
                             <Edit2 size={16} />
                           </button>
-                          <button onClick={() => handleDelete(holding.id)} className="text-red-600 hover:text-red-800 dark:hover:text-red-400" title="Delete Holding">
+                          <button onClick={() => handleDelete(holding.id)} className="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-1.5 rounded" title="Delete Holding">
                             <Trash2 size={16} />
                           </button>
                         </div>

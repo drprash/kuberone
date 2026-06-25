@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { accountsAPI, holdingsAPI, marketAPI } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import { AccountSummary, AccountCreateRequest, AssetType } from '../types';
@@ -28,7 +29,6 @@ export default function Accounts() {
   const [isReordering, setIsReordering] = useState(false);
   const [orderedAccounts, setOrderedAccounts] = useState<AccountSummary[]>([]);
   const draggedIdRef = React.useRef<string | null>(null);
-
   useEffect(() => {
     loadAccounts();
   }, []);
@@ -134,8 +134,8 @@ export default function Accounts() {
   return (
     <div>
       <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Accounts</h2>
+        <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
+          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Accounts</h2>
           <div className="flex gap-2">
             {currentUser?.role === 'ADMIN' && (
               <button
@@ -239,6 +239,7 @@ export default function Accounts() {
           onSuccess={() => { setEditingAccount(null); loadAccounts(); }}
         />
       )}
+
     </div>
   );
 }
@@ -254,17 +255,22 @@ function AccountCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const navigate = useNavigate();
   const currency = account.currency || 'INR';
   const assetTypeOrder = Object.values(AssetType);
   const sortedAssetTypes = [...account.asset_types].sort(
     (a, b) => assetTypeOrder.indexOf(a as AssetType) - assetTypeOrder.indexOf(b as AssetType)
   );
-
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 card-hover">
+    <div
+      className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 card-hover cursor-pointer"
+      onClick={() => navigate(`/holdings?account=${account.id}`)}
+    >
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1 min-w-0 mr-2">
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2 truncate">{accountDisplayName(account)}</h3>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2 truncate">
+            {accountDisplayName(account)}
+          </h3>
           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
             {sortedAssetTypes.map((type) => (
               <span key={type} className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 text-xs rounded">
@@ -273,34 +279,37 @@ function AccountCard({
             ))}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick={onEdit} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 p-2" title="Edit Account">
+        <div className="flex gap-1 shrink-0 items-center">
+          <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 p-2" title="Edit Account">
             <Edit2 size={18} />
           </button>
-          <button onClick={onDelete} className="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-2" title="Delete Account">
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-red-600 hover:text-red-800 dark:hover:text-red-400 p-2" title="Delete Account">
             <Trash2 size={18} />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mt-4">
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Invested Amount</p>
-          <p className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4">
+        <div className="min-w-0">
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Invested</p>
+          <p className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
             {formatAmount(Number(account.invested_amount), currency)}
           </p>
         </div>
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Current Value</p>
-          <p className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
+        <div className="min-w-0">
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Current</p>
+          <p className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
             {formatAmount(Number(account.current_value), currency)}
           </p>
         </div>
-        <div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Holdings</p>
-          <p className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">{account.holdings_count}</p>
+        <div className="min-w-0">
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Holdings</p>
+          <p className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white">
+            {account.holdings_count}
+          </p>
         </div>
       </div>
+
     </div>
   );
 }
@@ -347,7 +356,7 @@ function AddAccountModal({
 
   return (
     <div className="fixed inset-0 modal-backdrop flex items-center justify-center z-50 fade-in">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-8 max-w-md w-full mx-4 slide-in">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 sm:p-8 max-w-md w-full mx-4 slide-in max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Add Account</h2>
           <button onClick={onClose} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={24} /></button>
@@ -467,7 +476,7 @@ function EditAccountModal({
 
   return (
     <div className="fixed inset-0 modal-backdrop flex items-center justify-center z-50 fade-in">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-8 max-w-md w-full mx-4 slide-in">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 sm:p-8 max-w-md w-full mx-4 slide-in max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Edit Account</h2>
           <button onClick={onClose} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={24} /></button>

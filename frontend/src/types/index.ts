@@ -213,6 +213,7 @@ export interface BackupAccount {
   name: string;
   currency: string;
   asset_types: string[];
+  sort_order?: number;
   user_id: string;
   user_email: string;
   user_first_name: string;

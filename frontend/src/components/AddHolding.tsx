@@ -45,6 +45,19 @@ export default function AddHolding({ holding, onClose, onSuccess }: AddHoldingPr
     }
   }, [holding]);
 
+  // Reset assetType to first allowed type when account changes
+  useEffect(() => {
+    if (isEditing || !accountId) return;
+    const selectedAccount = accounts.find((acc) => acc.id === accountId);
+    if (!selectedAccount) return;
+    const allowed = Object.values(AssetType).filter((type) =>
+      selectedAccount.asset_types.includes(type)
+    );
+    if (allowed.length > 0 && !allowed.includes(assetType)) {
+      setAssetType(allowed[0]);
+    }
+  }, [accountId, accounts]);
+
   const loadAccounts = async () => {
     try {
       const data = await accountsAPI.getAll();
@@ -153,7 +166,7 @@ export default function AddHolding({ holding, onClose, onSuccess }: AddHoldingPr
 
   return (
     <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 fade-in">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md slide-in">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md slide-in max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b dark:border-gray-700">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">{modalTitle}</h2>
           <button onClick={onClose} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
