@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
 from app.config import settings
-from app.routers import auth, holdings, market, accounts, admin, backup
+from app.routers import auth, holdings, market, accounts, admin, backup, portfolio
+from app.snapshot import capture_all_families
 
 def build_allowed_origins(frontend_url_value: str) -> list[str]:
     origins = [item.strip() for item in frontend_url_value.split(",") if item.strip()]
@@ -76,6 +78,43 @@ app.include_router(holdings.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
+app.include_router(portfolio.router, prefix="/api")
+
+
+def _run_daily_snapshot_job() -> None:
+    """Captures today's portfolio snapshot for every family — see app.snapshot."""
+    db = SessionLocal()
+    try:
+        count = capture_all_families(db)
+        print(f"Daily portfolio snapshot: captured {count} families")
+    except Exception as e:
+        print(f"Daily portfolio snapshot job failed: {e}")
+    finally:
+        db.close()
+
+
+scheduler = BackgroundScheduler(timezone="UTC")
+
+
+@app.on_event("startup")
+def _start_scheduler() -> None:
+    # Single backend process (no --workers), so one in-process scheduler is safe —
+    # no risk of the same job firing multiple times from separate workers.
+    scheduler.add_job(
+        _run_daily_snapshot_job,
+        "cron",
+        hour=23,
+        minute=55,
+        id="daily_portfolio_snapshot",
+        replace_existing=True,
+    )
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def _stop_scheduler() -> None:
+    scheduler.shutdown(wait=False)
+
 
 @app.get("/api/health")
 def health_check():

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from uuid import UUID
 from app.models import AssetType, Role, PrivacyLevel
@@ -178,8 +178,8 @@ class HoldingCreate(BaseModel):
 class HoldingUpdate(BaseModel):
     symbol: Optional[str] = None
     name: Optional[str] = None
-    quantity: Optional[Decimal] = None
-    avg_buy_price: Optional[Decimal] = None
+    quantity: Optional[Decimal] = Field(None, gt=0)
+    avg_buy_price: Optional[Decimal] = Field(None, gt=0)
     asset_type: Optional[AssetType] = None
     is_draft: Optional[bool] = None
 
@@ -206,6 +206,7 @@ class MarketPrice(BaseModel):
     symbol: str
     current_price: Optional[Decimal]
     name: Optional[str]
+    currency: Optional[str] = None
     day_change: Optional[Decimal] = None
     day_change_pct: Optional[Decimal] = None
     error: Optional[str] = None
@@ -216,3 +217,9 @@ class MarketQuote(BaseModel):
     current_price: Optional[Decimal]
     currency: Optional[str]
     error: Optional[str] = None
+
+# Portfolio history (real daily snapshots — see models.PortfolioSnapshot)
+class PortfolioSnapshotResponse(BaseModel):
+    date: date
+    total_investment: Decimal
+    total_value: Decimal

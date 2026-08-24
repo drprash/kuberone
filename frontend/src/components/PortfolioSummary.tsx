@@ -1,7 +1,7 @@
 import React from 'react';
 import type { PortfolioSummary } from '../types';
 import { formatAmount } from '../lib/currencies';
-import { TrendingUp, TrendingDown, Wallet, PieChart } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, PieChart, AlertTriangle } from 'lucide-react';
 
 interface PortfolioSummaryProps {
   summary: PortfolioSummary;
@@ -12,7 +12,16 @@ export default function PortfolioSummaryComponent({ summary, baseCurrency }: Por
   const isProfit = summary.total_profit_loss >= 0;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="mb-6">
+    {!!summary.unpriced_count && (
+      <div className="flex items-center gap-2 mb-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2">
+        <AlertTriangle size={14} className="shrink-0" />
+        <span>
+          {summary.unpriced_count} holding{summary.unpriced_count > 1 ? 's' : ''} could not be priced right now and {summary.unpriced_count > 1 ? 'are' : 'is'} excluded from the totals below.
+        </span>
+      </div>
+    )}
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow card-hover">
         <div className="flex items-center justify-between">
           <div className="min-w-0 mr-2">
@@ -66,6 +75,7 @@ export default function PortfolioSummaryComponent({ summary, baseCurrency }: Por
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }

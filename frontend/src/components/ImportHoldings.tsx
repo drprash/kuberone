@@ -30,6 +30,17 @@ function parseAssetType(value: string | undefined): AssetType | null {
   return ASSET_TYPE_VALUES.includes(normalized as AssetType) ? (normalized as AssetType) : null;
 }
 
+/** Parses a spreadsheet number cell, stripping thousands separators and currency
+ * symbols (e.g. "2,450.50", "1,00,000", "₹150") so `parseFloat` doesn't silently
+ * truncate at the first comma. Returns null if nothing numeric survives. */
+function parseNumericCell(raw: string): number | null {
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(/[^0-9.\-]/g, '');
+  if (cleaned === '' || cleaned === '-' || cleaned === '.') return null;
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
 export default function ImportHoldings({ onClose, onSuccess }: ImportHoldingsProps) {
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -122,8 +133,8 @@ export default function ImportHoldings({ onClose, onSuccess }: ImportHoldingsPro
         const name = norm['name'] || '';
         const assetTypeRaw = norm['asset_type'] || norm['type'] || '';
 
-        const quantity = quantityRaw !== '' ? parseFloat(quantityRaw) : null;
-        const avg_buy_price = priceRaw !== '' ? parseFloat(priceRaw) : null;
+        const quantity = parseNumericCell(quantityRaw);
+        const avg_buy_price = parseNumericCell(priceRaw);
         const asset_type = parseAssetType(assetTypeRaw) || defaultAssetType || null;
 
         const errors: string[] = [];

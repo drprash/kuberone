@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { holdingsAPI, marketAPI, accountsAPI } from '../lib/api';
+import { holdingsAPI, marketAPI, accountsAPI, portfolioAPI } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import { usePriceStore } from '../store/priceStore';
 import { getExchangeRate, formatAmount } from '../lib/currencies';
-import type { HoldingWithMarketData, PortfolioSummary, AccountSummary } from '../types';
+import type { HoldingWithMarketData, PortfolioSummary, AccountSummary, PortfolioSnapshot } from '../types';
 import PortfolioSummaryComponent from './PortfolioSummary';
 import PortfolioTrendline from './PortfolioTrendline';
 import AddHolding from './AddHolding';
@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [pricesLoading, setPricesLoading] = useState(false);
   const [showAddHolding, setShowAddHolding] = useState(false);
   const [editingHolding, setEditingHolding] = useState<HoldingWithMarketData | null>(null);
+  const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
   const navigate = useNavigate();
   const family = useAuthStore((state) => state.family);
   const baseCurrency = family?.base_currency || 'INR';
@@ -37,12 +38,32 @@ export default function Dashboard() {
   ): HoldingWithMarketData[] =>
     holdingsData.map((h) => {
       const priceData = priceMap[h.symbol.toUpperCase()] || {};
+      const priceUnavailable = priceData.current_price == null || !!priceData.error;
+      if (priceUnavailable) {
+        // Don't value a failed fetch at zero — that reads as a fabricated total loss.
+        // Leave price fields undefined so this holding drops out of totals/gainer-loser lists.
+        return {
+          ...h,
+          current_price: undefined,
+          current_value: undefined,
+          profit_loss: undefined,
+          profit_loss_percentage: undefined,
+          day_change: null,
+          day_change_pct: null,
+          price_unavailable: true,
+        };
+      }
       const accountCurrency = accountCurrencyMap[h.account_id] || baseCurrency;
-      const fx = getExchangeRate(accountCurrency, baseCurrency);
-      const current_price = Number(priceData.current_price) || 0;
+      // avg_buy_price is entered by the user in the account's currency, but the live
+      // price comes back in whatever currency the security itself trades in (e.g. AAPL
+      // quotes in USD even inside an INR account) — each side needs its own FX rate.
+      const priceCurrency = priceData.currency || accountCurrency;
+      const fxAccount = getExchangeRate(accountCurrency, baseCurrency);
+      const fxPrice = getExchangeRate(priceCurrency, baseCurrency);
+      const current_price = Number(priceData.current_price);
       const quantity = Number(h.quantity);
-      const current_value = current_price * quantity * fx;
-      const investment = Number(h.avg_buy_price) * quantity * fx;
+      const current_value = current_price * quantity * fxPrice;
+      const investment = Number(h.avg_buy_price) * quantity * fxAccount;
       const profit_loss = current_value - investment;
       const profit_loss_percentage = investment > 0 ? (profit_loss / investment) * 100 : 0;
       return {
@@ -51,8 +72,12 @@ export default function Dashboard() {
         current_value,
         profit_loss,
         profit_loss_percentage,
-        day_change: priceData.day_change != null ? Number(priceData.day_change) : null,
+        // Converted to base currency here so downstream (daily impact) doesn't need
+        // to re-derive the FX rate.
+        day_change: priceData.day_change != null ? Number(priceData.day_change) * fxPrice : null,
         day_change_pct: priceData.day_change_pct != null ? Number(priceData.day_change_pct) : null,
+        price_unavailable: false,
+        price_currency: priceCurrency,
       };
     });
 
@@ -107,18 +132,31 @@ export default function Dashboard() {
     }
   };
 
+  const fetchHistory = async () => {
+    try {
+      const data = await portfolioAPI.getHistory(30);
+      setHistory(data);
+    } catch {
+      // Non-critical: the trendline just falls back to its "building history" state.
+    }
+  };
+
   useEffect(() => {
     fetchHoldings();
+    fetchHistory();
   }, []);
 
   const calculateSummary = (): PortfolioSummary => {
-    const total_investment = holdings.reduce(
+    // Holdings with no live price are excluded entirely (not valued at zero) — otherwise
+    // their full cost basis reads as a fabricated 100% loss.
+    const priced = holdings.filter((h) => !h.price_unavailable);
+    const total_investment = priced.reduce(
       (sum, h) => sum + (h.current_value !== undefined && h.profit_loss !== undefined
         ? h.current_value - h.profit_loss
         : Number(h.avg_buy_price) * Number(h.quantity)),
       0
     );
-    const current_value = holdings.reduce((sum, h) => sum + (h.current_value || 0), 0);
+    const current_value = priced.reduce((sum, h) => sum + (h.current_value || 0), 0);
     const total_profit_loss = current_value - total_investment;
     const total_profit_loss_percentage =
       total_investment > 0 ? (total_profit_loss / total_investment) * 100 : 0;
@@ -129,6 +167,7 @@ export default function Dashboard() {
       total_profit_loss,
       total_profit_loss_percentage,
       holdings_count: holdings.length,
+      unpriced_count: holdings.length - priced.length,
     };
   };
 
@@ -210,6 +249,7 @@ export default function Dashboard() {
           <>
             <PortfolioTrendline
               summary={summary}
+              history={history}
               baseCurrency={baseCurrency}
               loading={pricesLoading}
             />

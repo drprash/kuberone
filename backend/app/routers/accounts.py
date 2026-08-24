@@ -61,8 +61,11 @@ def get_accounts(
     # Calculate summaries for each account
     result = []
     for account in accounts:
+        # Exclude drafts: current_value (computed client-side) also excludes drafts,
+        # so invested_amount/holdings_count must match or P&L is skewed.
         holdings = db.query(models.Holding).filter(
-            models.Holding.account_id == account.id
+            models.Holding.account_id == account.id,
+            models.Holding.is_draft == False
         ).all()
 
         invested_amount = sum(h.quantity * h.avg_buy_price for h in holdings)
@@ -183,9 +186,11 @@ def get_account_summary(
             detail="Account does not belong to your family"
         )
 
-    # Calculate summary
+    # Calculate summary — exclude drafts, matching current_value (computed client-side
+    # from holdingsAPI.getAll(), which defaults to non-draft only)
     holdings = db.query(models.Holding).filter(
-        models.Holding.account_id == account.id
+        models.Holding.account_id == account.id,
+        models.Holding.is_draft == False
     ).all()
 
     invested_amount = sum(h.quantity * h.avg_buy_price for h in holdings)

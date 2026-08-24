@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Enum as SQLEnum, Numeric, Boolean, Integer
+from sqlalchemy import Column, String, DateTime, Date, ForeignKey, Enum as SQLEnum, Numeric, Boolean, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -122,4 +122,19 @@ class ActivationToken(Base):
     token = Column(String(255), unique=True, nullable=False, index=True)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# Portfolio Snapshot — one row per family per day, captured by a daily job.
+# Powers the real (not fabricated) portfolio performance history on the Dashboard.
+class PortfolioSnapshot(Base):
+    __tablename__ = "portfolio_snapshots"
+    __table_args__ = (
+        UniqueConstraint("family_id", "snapshot_date", name="uq_portfolio_snapshot_family_date"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    family_id = Column(UUID(as_uuid=True), ForeignKey("families.id"), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False)
+    total_investment = Column(Numeric(18, 2), nullable=False)
+    total_value = Column(Numeric(18, 2), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

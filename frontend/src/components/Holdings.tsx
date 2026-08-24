@@ -32,6 +32,47 @@ function timeAgo(ts: number): string {
   return `${Math.floor(minutes / 60)}h ago`;
 }
 
+/** Applies a fetched price to a holding, or marks it unpriced if the fetch failed —
+ * never silently values a missing price at zero. */
+function priceHolding(
+  holding: Holding,
+  priceData: { current_price?: number | string | null; currency?: string; error?: string } | undefined,
+  accountCurrency: string,
+  baseCurrency: string
+): HoldingWithMarketData {
+  const priceUnavailable = !priceData || priceData.current_price == null || !!priceData.error;
+  if (priceUnavailable) {
+    return {
+      ...holding,
+      current_price: undefined,
+      current_value: undefined,
+      profit_loss: undefined,
+      profit_loss_percentage: undefined,
+      price_unavailable: true,
+    };
+  }
+  // avg_buy_price is entered in the account's currency; the live price comes back in
+  // whatever currency the security itself trades in (e.g. AAPL quotes in USD even
+  // inside an INR account) — each side needs its own FX rate to base currency.
+  const priceCurrency = priceData.currency || accountCurrency;
+  const fxAccount = getExchangeRate(accountCurrency, baseCurrency);
+  const fxPrice = getExchangeRate(priceCurrency, baseCurrency);
+  const currentPrice = Number(priceData.current_price);
+  const currentValue = Number(holding.quantity) * currentPrice * fxPrice;
+  const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price) * fxAccount;
+  const profitLoss = currentValue - investedValue;
+  const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
+  return {
+    ...holding,
+    current_price: currentPrice,
+    current_value: currentValue,
+    profit_loss: profitLoss,
+    profit_loss_percentage: profitLossPercentage,
+    price_unavailable: false,
+    price_currency: priceCurrency,
+  };
+}
+
 export default function Holdings() {
   const [holdings, setHoldings] = useState<HoldingWithMarketData[]>([]);
   const [draftHoldings, setDraftHoldings] = useState<Holding[]>([]);
@@ -84,15 +125,9 @@ export default function Holdings() {
 
       if (!force && priceStore.isCacheFresh(symbols)) {
         const holdingsWithPrices = nonDrafts.map((holding) => {
-          const priceData = priceStore.priceMap[holding.symbol.toUpperCase()] || {};
-          const currentPrice = Number(priceData.current_price) || 0;
+          const priceData = priceStore.priceMap[holding.symbol.toUpperCase()];
           const accountCurrency = accountCurrencyMap[holding.account_id] || baseCurrency;
-          const fx = getExchangeRate(accountCurrency, baseCurrency);
-          const currentValue = Number(holding.quantity) * currentPrice * fx;
-          const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price) * fx;
-          const profitLoss = currentValue - investedValue;
-          const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
-          return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
+          return priceHolding(holding, priceData, accountCurrency, baseCurrency);
         });
         setHoldings(holdingsWithPrices);
         setLoading(false);
@@ -106,15 +141,9 @@ export default function Holdings() {
       priceStore.setPrices(priceMap);
 
       const holdingsWithPrices = nonDrafts.map((holding) => {
-        const priceData = priceMap[holding.symbol.toUpperCase()] || {};
-        const currentPrice = Number(priceData.current_price) || 0;
+        const priceData = priceMap[holding.symbol.toUpperCase()];
         const accountCurrency = accountCurrencyMap[holding.account_id] || baseCurrency;
-        const fx = getExchangeRate(accountCurrency, baseCurrency);
-        const currentValue = Number(holding.quantity) * currentPrice * fx;
-        const investedValue = Number(holding.quantity) * Number(holding.avg_buy_price) * fx;
-        const profitLoss = currentValue - investedValue;
-        const profitLossPercentage = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
-        return { ...holding, current_price: currentPrice, current_value: currentValue, profit_loss: profitLoss, profit_loss_percentage: profitLossPercentage };
+        return priceHolding(holding, priceData, accountCurrency, baseCurrency);
       });
 
       setHoldings(holdingsWithPrices);
@@ -198,11 +227,13 @@ export default function Holdings() {
   const displayCurrency = selectedAccount?.currency || baseCurrency;
 
   const holdingsSummary = useMemo((): PortfolioSummary => {
-    const total_investment = holdings.reduce(
+    // Holdings with no live price are excluded from totals rather than counted as worth zero.
+    const priced = holdings.filter((h) => !h.price_unavailable);
+    const total_investment = priced.reduce(
       (sum, h) => sum + ((h.current_value ?? 0) - (h.profit_loss ?? 0)),
       0
     );
-    const current_value = holdings.reduce((sum, h) => sum + (h.current_value || 0), 0);
+    const current_value = priced.reduce((sum, h) => sum + (h.current_value || 0), 0);
     const total_profit_loss = current_value - total_investment;
     const total_profit_loss_percentage =
       total_investment > 0 ? (total_profit_loss / total_investment) * 100 : 0;
@@ -212,6 +243,7 @@ export default function Holdings() {
       total_profit_loss,
       total_profit_loss_percentage,
       holdings_count: holdings.length,
+      unpriced_count: holdings.length - priced.length,
     };
   }, [holdings]);
 
@@ -391,6 +423,7 @@ export default function Holdings() {
                   const ccy = holdingCurrency(holding.account_id);
                   const fx = getExchangeRate(ccy, baseCurrency);
                   const invested = Number(holding.quantity) * Number(holding.avg_buy_price);
+                  const unavailable = !!holding.price_unavailable;
                   const current = Number(holding.current_value) || 0;
                   const pl = Number(holding.profit_loss) || 0;
                   const plPercent = Number(holding.profit_loss_percentage) || 0;
@@ -406,15 +439,34 @@ export default function Holdings() {
                       <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-300">{holding.asset_type}</td>
                       <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatNumber(Number(holding.quantity))}</td>
                       <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatAmount(Number(holding.avg_buy_price), ccy, 2)}</td>
-                      <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">{formatAmount(Number(holding.current_price) || 0, ccy, 2)}</td>
-                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(invested * fx, baseCurrency)}</td>
-                      <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(current, baseCurrency)}</td>
-                      <td className={`py-3 px-4 text-right text-sm font-semibold ${pl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatAmount(pl, baseCurrency)}
-                      </td>
-                      <td className={`py-3 px-4 text-right text-sm font-semibold ${plPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatPercentage(plPercent)}
-                      </td>
+                      {unavailable ? (
+                        <>
+                          <td className="py-3 px-4 text-right text-xs text-amber-600 dark:text-amber-400" title="Market price unavailable">Unavailable</td>
+                          <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(invested * fx, baseCurrency)}</td>
+                          <td className="py-3 px-4 text-right text-xs text-amber-600 dark:text-amber-400">—</td>
+                          <td className="py-3 px-4 text-right text-xs text-amber-600 dark:text-amber-400">—</td>
+                          <td className="py-3 px-4 text-right text-xs text-amber-600 dark:text-amber-400">—</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-3 px-4 text-right text-sm text-gray-900 dark:text-white">
+                            {formatAmount(Number(holding.current_price) || 0, holding.price_currency || ccy, 2)}
+                            {holding.price_currency && holding.price_currency !== ccy && (
+                              <span className="block text-[10px] text-gray-400 dark:text-gray-500" title={`Trades in ${holding.price_currency}, account is ${ccy}`}>
+                                account: {ccy}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(invested * fx, baseCurrency)}</td>
+                          <td className="py-3 px-4 text-right text-sm font-medium text-gray-900 dark:text-white">{formatAmount(current, baseCurrency)}</td>
+                          <td className={`py-3 px-4 text-right text-sm font-semibold ${pl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatAmount(pl, baseCurrency)}
+                          </td>
+                          <td className={`py-3 px-4 text-right text-sm font-semibold ${plPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatPercentage(plPercent)}
+                          </td>
+                        </>
+                      )}
                       <td className="py-3 px-4">
                         <div className="flex gap-2 justify-center">
                           <button onClick={() => setEditingHolding(holding)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 p-1.5 rounded" title="Edit Holding">

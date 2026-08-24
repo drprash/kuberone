@@ -24,7 +24,12 @@ export const usePriceStore = create<PriceState>()(
         const { fetchedAt, ttlMs, priceMap } = get();
         if (!fetchedAt) return false;
         if (Date.now() - fetchedAt > ttlMs) return false;
-        return neededSymbols.every((s) => s.toUpperCase() in priceMap);
+        // A cached fetch failure (error / null price) doesn't count as "fresh" —
+        // retry it instead of treating the holding as worth zero for the full TTL.
+        return neededSymbols.every((s) => {
+          const price = priceMap[s.toUpperCase()];
+          return !!price && !price.error && price.current_price != null;
+        });
       },
 
       setPrices: (prices) =>

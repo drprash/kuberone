@@ -14,6 +14,7 @@ def _fetch_price(symbol: str) -> schemas.MarketPrice:
         ticker = yf.Ticker(symbol)
         current_price = None
         name = None
+        currency = None
         day_change = None
         day_change_pct = None
 
@@ -37,6 +38,16 @@ def _fetch_price(symbol: str) -> schemas.MarketPrice:
             except Exception as e:
                 print(f"Fast_info failed for {symbol}: {e}")
 
+        # The security may trade in a different currency than the account it's held
+        # in (e.g. AAPL/USD inside an INR account) — report it so the frontend converts
+        # correctly instead of assuming the account's currency. fast_info.currency is
+        # cheap (no extra network round trip beyond what we've already paid for above).
+        try:
+            if hasattr(ticker.fast_info, 'currency') and ticker.fast_info.currency:
+                currency = ticker.fast_info.currency
+        except Exception as e:
+            print(f"Fast_info currency failed for {symbol}: {e}")
+
         if day_change is None:
             try:
                 if hasattr(ticker.fast_info, 'regularMarketChange'):
@@ -50,12 +61,15 @@ def _fetch_price(symbol: str) -> schemas.MarketPrice:
             except Exception as e:
                 print(f"Fast_info day change failed for {symbol}: {e}")
 
-        if current_price is None:
+        if current_price is None or currency is None:
             try:
                 info = ticker.info
                 if info:
-                    current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
-                    name = info.get('longName') or info.get('shortName')
+                    if current_price is None:
+                        current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+                        name = info.get('longName') or info.get('shortName')
+                    if currency is None:
+                        currency = info.get('currency') or info.get('financialCurrency')
             except Exception as e:
                 print(f"Info failed for {symbol}: {e}")
 
@@ -63,6 +77,8 @@ def _fetch_price(symbol: str) -> schemas.MarketPrice:
             return schemas.MarketPrice(
                 symbol=symbol,
                 current_price=None,
+                name=name,
+                currency=currency,
                 error=f"Failed to fetch price for {symbol}. Verify symbol (e.g. AAPL for US, RELIANCE.NS for India)"
             )
 
@@ -70,6 +86,7 @@ def _fetch_price(symbol: str) -> schemas.MarketPrice:
             symbol=symbol,
             current_price=Decimal(str(current_price)),
             name=name,
+            currency=currency,
             day_change=Decimal(str(round(day_change, 4))) if day_change is not None else None,
             day_change_pct=Decimal(str(round(day_change_pct, 4))) if day_change_pct is not None else None,
         )

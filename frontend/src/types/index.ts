@@ -86,6 +86,11 @@ export interface HoldingWithMarketData extends Holding {
   profit_loss_percentage?: number;
   day_change?: number | null;
   day_change_pct?: number | null;
+  /** True when the market price fetch failed/returned no price — excluded from portfolio totals. */
+  price_unavailable?: boolean;
+  /** Currency current_price/day_change are denominated in — the security's own
+   * trading currency, which may differ from the holding's account currency. */
+  price_currency?: string;
 }
 
 // Market
@@ -161,6 +166,9 @@ export interface MarketPrice {
   symbol: string;
   current_price?: number;
   name?: string;
+  /** ISO currency the security itself trades in (e.g. "USD" for AAPL) — not
+   * necessarily the currency of the account the holding lives in. */
+  currency?: string;
   day_change?: number | null;
   day_change_pct?: number | null;
   error?: string;
@@ -242,4 +250,13 @@ export interface PortfolioSummary {
   total_profit_loss: number;
   total_profit_loss_percentage: number;
   holdings_count: number;
+  /** Holdings excluded from the totals above because their market price is unavailable. */
+  unpriced_count?: number;
+}
+
+// Real daily portfolio history point (see backend app.snapshot) — one per family per day.
+export interface PortfolioSnapshot {
+  date: string;
+  total_investment: number;
+  total_value: number;
 }

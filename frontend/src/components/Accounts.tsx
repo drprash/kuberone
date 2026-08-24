@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { accountsAPI, holdingsAPI, marketAPI } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
 import { AccountSummary, AccountCreateRequest, AssetType } from '../types';
-import { CURRENCIES, formatAmount } from '../lib/currencies';
+import { CURRENCIES, formatAmount, getExchangeRate } from '../lib/currencies';
 import toast from 'react-hot-toast';
 import { Edit2, Trash2, X, GripVertical, ArrowLeftRight } from 'lucide-react';
+
+type AccountSummaryWithPricing = AccountSummary & { price_unavailable?: boolean };
 
 const inputCls = "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white";
 const labelCls = "block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1";
@@ -20,14 +22,14 @@ function accountDisplayName(account: AccountSummary): string {
 }
 
 export default function Accounts() {
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [accounts, setAccounts] = useState<AccountSummaryWithPricing[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountSummary | null>(null);
   const currentUser = useAuthStore((state) => state.user);
   const family = useAuthStore((state) => state.family);
   const [isReordering, setIsReordering] = useState(false);
-  const [orderedAccounts, setOrderedAccounts] = useState<AccountSummary[]>([]);
+  const [orderedAccounts, setOrderedAccounts] = useState<AccountSummaryWithPricing[]>([]);
   const draggedIdRef = React.useRef<string | null>(null);
   useEffect(() => {
     loadAccounts();
@@ -37,30 +39,47 @@ export default function Accounts() {
     try {
       const data = await accountsAPI.getAll();
 
-      const accountsWithValues = await Promise.all(
+      const accountsWithValues: AccountSummaryWithPricing[] = await Promise.all(
         data.map(async (account) => {
           try {
             const holdings = await holdingsAPI.getAll(account.id);
             let currentValue = 0;
+            // Cost of holdings whose price couldn't be fetched — excluded from both sides
+            // of the P&L comparison instead of being valued at zero (a fabricated loss).
+            let unpricedCost = 0;
+            let priceUnavailable = false;
             await Promise.all(
               holdings.map(async (holding) => {
                 try {
                   const priceData = await marketAPI.getPrice(holding.symbol);
-                  const price = Number(priceData.current_price) || 0;
+                  if (priceData.current_price == null || priceData.error) {
+                    unpricedCost += Number(holding.quantity) * Number(holding.avg_buy_price);
+                    priceUnavailable = true;
+                    return;
+                  }
+                  // The security may trade in a different currency than this account
+                  // (e.g. AAPL/USD inside an INR account) — convert into the account's
+                  // currency, since this card displays everything in account.currency.
+                  const priceCurrency = priceData.currency || account.currency;
+                  const fx = getExchangeRate(priceCurrency, account.currency);
+                  const price = Number(priceData.current_price) * fx;
                   currentValue += price * Number(holding.quantity);
                 } catch {
-                  // skip on failure
+                  unpricedCost += Number(holding.quantity) * Number(holding.avg_buy_price);
+                  priceUnavailable = true;
                 }
               })
             );
+            const comparableInvested = Number(account.invested_amount) - unpricedCost;
             return {
               ...account,
               current_value: currentValue,
-              profit_loss: currentValue - Number(account.invested_amount),
+              profit_loss: currentValue - comparableInvested,
               profit_loss_percentage:
-                Number(account.invested_amount) > 0
-                  ? ((currentValue - Number(account.invested_amount)) / Number(account.invested_amount)) * 100
+                comparableInvested > 0
+                  ? ((currentValue - comparableInvested) / comparableInvested) * 100
                   : 0,
+              price_unavailable: priceUnavailable,
             };
           } catch {
             return account;
@@ -250,7 +269,7 @@ function AccountCard({
   onEdit,
   onDelete,
 }: {
-  account: AccountSummary;
+  account: AccountSummaryWithPricing;
   onUpdate: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -297,7 +316,12 @@ function AccountCard({
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Current</p>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1">
+            Current
+            {account.price_unavailable && (
+              <span className="text-amber-500" title="One or more holdings could not be priced; excluded from this figure">*</span>
+            )}
+          </p>
           <p className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-white truncate">
             {formatAmount(Number(account.current_value), currency)}
           </p>
