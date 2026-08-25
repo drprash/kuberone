@@ -72,7 +72,7 @@ KuberOne is a self-hosted, family-scoped portfolio tracking platform. A family a
 
 3. **Start the application**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 4. **Open your browser**: [http://localhost:5173](http://localhost:5173)
@@ -120,25 +120,29 @@ To restore, upload a KuberOne backup file. Two modes are available:
 
 Accounts are matched by name + currency + owner. New accounts are created if no match is found; existing accounts are never duplicated.
 
+### Preferences
+
+Go to **Settings → Preferences** to set the price cache duration (1 minute to 1 hour). Market prices are cached client-side for this duration and reused across the Dashboard and Holdings pages; use Refresh to force an immediate update.
+
 ## Docker Commands
 
 ```bash
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # Stop services (keep data)
-docker-compose down
+docker compose down
 
 # Stop and remove volumes (deletes database)
-docker-compose down -v
+docker compose down -v
 
 # Rebuild after code changes
-docker-compose up -d --build
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f
-docker-compose logs -f backend
-docker-compose logs -f frontend
+docker compose logs -f
+docker compose logs -f backend
+docker compose logs -f frontend
 ```
 
 ## Security
@@ -153,8 +157,8 @@ docker-compose logs -f frontend
 
 **Database connection failed**
 ```bash
-docker-compose ps       # Check all containers are running
-docker-compose logs db  # Check PostgreSQL logs
+docker compose ps       # Check all containers are running
+docker compose logs db  # Check PostgreSQL logs
 ```
 
 **Port 5173 already in use**
@@ -173,8 +177,8 @@ Also update `FRONTEND_URL` in `.env` to match.
 
 **Frontend shows blank page**
 ```bash
-docker-compose logs frontend
-docker-compose up -d --build frontend
+docker compose logs frontend
+docker compose up -d --build frontend
 ```
 
 ## License
