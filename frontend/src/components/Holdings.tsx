@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { holdingsAPI, accountsAPI, marketAPI } from '../lib/api';
 import { HoldingWithMarketData, Holding, AccountSummary, PortfolioSummary } from '../types';
 import { formatAmount, getExchangeRate } from '../lib/currencies';
+import { exportHoldingsToCSV, exportHoldingsToXLSX, HoldingExportRow } from '../lib/exportHoldings';
 import { usePriceStore } from '../store/priceStore';
 import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
 import AddHolding from './AddHolding';
 import ImportHoldings from './ImportHoldings';
 import PortfolioSummaryComponent from './PortfolioSummary';
-import { Edit2, Trash2, AlertTriangle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Edit2, Trash2, AlertTriangle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown, Download } from 'lucide-react';
 
 type SortKey =
   | 'symbol' | 'asset_type' | 'quantity' | 'avg_buy_price'
@@ -88,6 +89,8 @@ export default function Holdings() {
   const [editingHolding, setEditingHolding] = useState<HoldingWithMarketData | Holding | null>(null);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const priceStore = usePriceStore();
   const family = useAuthStore((state) => state.family);
   const baseCurrency = family?.base_currency || 'INR';
@@ -95,6 +98,17 @@ export default function Holdings() {
   useEffect(() => {
     loadData();
   }, [selectedAccountId]);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportMenu]);
 
   const loadData = async (force = false) => {
     setLoading(true);
@@ -247,6 +261,53 @@ export default function Holdings() {
     };
   }, [holdings]);
 
+  const exportRows = useMemo((): HoldingExportRow[] => {
+    return sortedHoldings.map((holding) => {
+      const ccy = holdingCurrency(holding.account_id);
+      const account = accounts.find((a) => a.id === holding.account_id);
+      const unavailable = !!holding.price_unavailable;
+      return {
+        symbol: holding.symbol,
+        name: formatName(holding.name),
+        asset_type: holding.asset_type,
+        account: account ? accountDisplayName(account) : '',
+        quantity: Number(holding.quantity),
+        avg_buy_price: Number(holding.avg_buy_price),
+        avg_buy_price_currency: ccy,
+        current_price: unavailable ? null : Number(holding.current_price) || 0,
+        current_price_currency: unavailable ? '' : holding.price_currency || ccy,
+        invested: Number(holding.quantity) * Number(holding.avg_buy_price) * getExchangeRate(ccy, baseCurrency),
+        current_value: unavailable ? null : Number(holding.current_value) || 0,
+        profit_loss: unavailable ? null : Number(holding.profit_loss) || 0,
+        profit_loss_percentage: unavailable ? null : Number(holding.profit_loss_percentage) || 0,
+      };
+    });
+  }, [sortedHoldings, accounts, baseCurrency]);
+
+  const exportFilenameBase = useMemo(() => {
+    const scope = selectedAccount ? accountDisplayName(selectedAccount).replace(/[^a-z0-9]+/gi, '-') : 'all-accounts';
+    const date = new Date().toISOString().slice(0, 10);
+    return `holdings-${scope}-${date}`;
+  }, [selectedAccount]);
+
+  const handleExport = async (format: 'csv' | 'xlsx') => {
+    setShowExportMenu(false);
+    if (exportRows.length === 0) {
+      toast.error('No holdings to export');
+      return;
+    }
+    try {
+      if (format === 'csv') {
+        exportHoldingsToCSV(exportRows, !selectedAccountId, baseCurrency, `${exportFilenameBase}.csv`);
+      } else {
+        await exportHoldingsToXLSX(exportRows, !selectedAccountId, baseCurrency, `${exportFilenameBase}.xlsx`);
+      }
+      toast.success(`Exported ${exportRows.length} holding${exportRows.length > 1 ? 's' : ''}`);
+    } catch {
+      toast.error('Failed to export holdings');
+    }
+  };
+
   const SortIcon = ({ col }: { col: SortKey }) => {
     if (sortKey !== col) return <ChevronsUpDown size={13} className="inline ml-1 text-gray-400 opacity-50" />;
     return sortDir === 'asc'
@@ -307,6 +368,32 @@ export default function Holdings() {
             >
               Import CSV / Excel
             </button>
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={holdings.length === 0}
+                className="flex items-center gap-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Download size={16} />
+                Export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-30 overflow-hidden">
+                  <button
+                    onClick={() => handleExport('csv')}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    Export as CSV
+                  </button>
+                  <button
+                    onClick={() => handleExport('xlsx')}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    Export as XLSX
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => setShowAddModal(true)}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 btn-press transition-all duration-200 font-medium"
